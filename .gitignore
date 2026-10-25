@@ -1,0 +1,14 @@
+# 运行时数据：含账户密码哈希与恢复码哈希，绝不入库
+.youju-data/
+
+# 开发中间产物与历史备份（含一份早期账户库备份）
+.work/
+
+# WorkBuddy 会话记忆
+.workbuddy/
+
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

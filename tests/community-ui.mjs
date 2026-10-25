@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import { createRequire } from 'node:module';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createApp } from '../server.mjs';
+const require = createRequire(path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/qa.cjs'));
+const { chromium } = require('playwright');
+const dataDir = await mkdtemp(path.join(os.tmpdir(), 'youju-community-ui-'));
+const out = path.resolve('.work/qa'); await mkdir(out, { recursive: true });
+const calls = [], errors = [], checks = [], remote = []; let empty = false;
+const server = createApp({ feedFetchImpl: async () => new Response('', { status: 503 }), dataDir, fetchImpl: async (_url, options) => {
+  calls.push(JSON.parse(options.body)); await delay(100);
+  return new Response(JSON.stringify({ Response: { RequestId: 'TEST-COMMUNITY-' + calls.length, Pages: empty ? [] : [{ title: '仅测试来源，不能作为参赛事实证据', url: 'https://source.example.org/a', passage: '仅测试：原始材料摘要，用于验证公众查证与图片流程。版本 ' + calls.length, pics: [{ origin_url: 'https://images.example.org/fixture.svg', caption: '仅测试来源配图' }, { origin_url: 'https://images.example.org/broken.png', caption: '仅测试加载失败' }] }] } }));
+} });
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const base = 'http://127.0.0.1:' + server.address().port, key = 'TEST-ONLY-NOT-A-REAL-SERVICE-KEY';
+const pass = label => { checks.push(label); console.log('PASS ' + label); };
+let browser;
+try {
+  browser = await chromium.launch({ executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true });
+  async function context() {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true, reducedMotion: 'reduce' });
+    await ctx.route('https://**/*', async route => { remote.push(route.request().url()); if (route.request().url().includes('broken.png')) return route.abort(); await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="180"><rect width="300" height="180" fill="#d7e6c7"/><text x="30" y="90">TEST IMAGE</text></svg>' }); });
+    const page = await ctx.newPage(); page.setDefaultTimeout(10000); page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => d.accept()); return { ctx, page };
+  }
+  const a = await context(), b = await context(); const page = a.page, bob = b.page;
+  await page.goto(base); await page.waitForSelector('.discovery-card'); await page.waitForLoadState('networkidle');
+  assert.equal(await page.locator('.discovery-card').count(), 3);
+  assert.ok(await page.locator('.discovery-card img').first().evaluate(img => img.complete && img.naturalWidth > 0));
+  assert.equal(calls.length, 0); assert.equal(remote.length, 0);
+  await page.screenshot({ path: path.join(out, 'v3-home-desktop.png'), fullPage: true });
+  await page.locator('.discovery-card').first().click(); assert.match(await page.locator('#question').inputValue(), /塑料瓶/); assert.equal(calls.length, 0);
+  pass('图文首页图片正常，主题插画有标识，点击卡片只填问题，不自动搜索');
+  await page.goto(base + '/#resources'); await page.waitForSelector('.resource-card'); assert.equal(await page.locator('.resource-card').count(), 6);
+  await page.locator('[data-community=resource-search]').nth(3).click();
+  await page.waitForSelector('#site'); assert.equal(await page.locator('#site').inputValue(), 'dpm.org.cn'); assert.equal(calls.length, 0);
+  await page.goto(base + '/#community'); await page.waitForSelector('.community-stats'); assert.match(await page.locator('.community-stats').innerText(), /0/);
+  await page.goto(base + '/#register'); await page.waitForSelector('#auth-form');
+  await page.locator('#auth-username').fill('alice'); await page.locator('#auth-nickname').fill('甲方查证员');
+  await page.locator('#auth-password').fill('TEST-password-alice'); await page.locator('#auth-confirm').fill('TEST-password-alice'); await page.locator('[name=agreement]').check(); await page.locator('#auth-form button[type=submit]').click();
+  await page.waitForSelector('.recovery-panel'); await page.locator('[data-account=ack-recovery]').click();
+  await page.goto(base + '/#certification'); await page.waitForSelector('#volunteer-form'); await page.locator('[name=pledge]').check(); await page.locator('#volunteer-form button[type=submit]').click(); await page.waitForSelector('.cert-success');
+  assert.ok((await a.ctx.cookies()).some(c => c.name === 'youju_member' && c.httpOnly));
+  await page.goto(base + '/#community');
+  await page.locator('.connect-btn').click(); await page.locator('#search-key').fill(key); await page.locator('#settings-form button[type=submit]').click(); await page.waitForFunction(() => !document.querySelector('#settings-dialog').open);
+  await page.locator('[data-community=new-topic]').first().click(); await page.locator('#topic-category').selectOption('生活求证'); await page.locator('#topic-query').fill('仅测试公开生活说法是否有原始依据'); await page.locator('[name=publicConsent]').check(); await page.locator('#topic-form button[type=submit]').click();
+  await page.waitForSelector('.public-source'); assert.equal(calls.length, 1); const topicUrl = page.url();
+  assert.match(await page.locator('.public-topic-heading').innerText(), /事实尚待核对/); assert.equal(remote.length, 0);
+  pass('公开资料可直达或设置站内搜索；报名后以搜索来源建立议题，身份由独立浏览器会话保存');
+  await page.locator('.source-media summary').click(); await page.locator('[data-community=load-images]').click();
+  await page.waitForSelector('.source-gallery img[src]'); await page.waitForSelector('.image-unavailable');
+  assert.ok(await page.locator('.source-gallery img[src]').first().evaluate(img => img.complete && img.naturalWidth > 0));
+  assert.equal(remote.length, 2);
+  pass('来源配图按需加载，显示图注和原图链接；图片加载失败有可操作提示');
+  const reason = '仅测试评议：引用原始资料说明，这条摘要没有完整列出适用条件，因此需要进一步回到来源核对。';
+  await page.locator('#review-stance').selectOption('unknown'); await page.locator('#review-reason').fill(reason); await page.locator('#review-form button[type=submit]').click();
+  await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('至少引用')); assert.equal(await page.locator('.review-card').count(), 0);
+  await page.locator('[name=sourceIds]').first().check(); await page.locator('#review-form button[type=submit]').click(); await page.waitForSelector('.review-card');
+  await bob.goto(topicUrl); await bob.waitForSelector('.review-card'); assert.match(await bob.locator('.review-card').innerText(), /甲方查证员/);
+  await bob.goto(base + '/#register'); await bob.waitForSelector('#auth-form');
+  await bob.locator('#auth-username').fill('bob'); await bob.locator('#auth-nickname').fill('乙方查证员'); await bob.locator('#auth-password').fill('TEST-password-bob'); await bob.locator('#auth-confirm').fill('TEST-password-bob'); await bob.locator('[name=agreement]').check(); await bob.locator('#auth-form button[type=submit]').click();
+  await bob.waitForSelector('.recovery-panel'); await bob.locator('[data-account=ack-recovery]').click();
+  await bob.goto(base + '/#certification'); await bob.waitForSelector('#volunteer-form'); await bob.locator('[name=pledge]').check(); await bob.locator('#volunteer-form button[type=submit]').click(); await bob.waitForSelector('.cert-success');
+  await bob.goto(topicUrl); await bob.waitForSelector('#review-form');
+  await bob.locator('#review-stance').selectOption('supports'); await bob.locator('#review-reason').fill(reason + '我认为其中部分描述提供了支持线索。'); await bob.locator('[name=sourceIds]').first().check(); await bob.locator('#review-form button[type=submit]').click(); await bob.waitForFunction(() => document.querySelectorAll('.review-card').length === 2);
+  await page.locator('[data-community=refresh]').click(); await page.waitForFunction(() => document.querySelectorAll('.review-card').length === 2);
+  assert.match(await page.locator('.community-disclaimer').first().innerText(), /人数.*不代表/);
+  pass('两个独立浏览器共享议题和不同署名评议；缺少来源无法提交，不把人数当真伪');
+  await page.locator('#review-reason').fill(reason + '更新：还需要更多资料核对。'); await page.locator('#review-form button[type=submit]').click(); await page.waitForFunction(() => document.querySelector('.review-card')?.textContent.includes('修改 1 次'));
+  await page.locator('[data-community=search-topic]').click(); await page.waitForFunction(() => document.querySelector('.public-topic-heading')?.textContent.includes('证据版本 2'));
+  assert.equal(calls.length, 2); assert.match(await page.locator('.review-card').first().innerText(), /新增证据后待复核/);
+  await page.locator('[data-community=report]').click(); await page.locator('#report-reason').fill('仅测试：来源摘要的适用条件需要再次核对'); await page.locator('#report-form button[type=submit]').click(); await page.waitForFunction(() => document.querySelector('.community-disclaimer')?.textContent.includes('异议登记'));
+  const download = page.waitForEvent('download'); await page.locator('[data-community=export-topic]').click(); const report = await readFile(await (await download).path(), 'utf8'); assert.match(report, /TEST-COMMUNITY/); assert.ok(!report.includes(key));
+  pass('意见可更新并留修改记录；补查后标记待复核；异议登记和不含密钥的报告导出可用');
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+    await page.screenshot({ path: path.join(out, 'v3-topic-test-' + width + '.png'), fullPage: true });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'topic overflow ' + width);
+    for (const route of ['community', 'resources', 'home']) { await page.goto(base + '/#' + route); await page.waitForTimeout(80); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), route + ' overflow ' + width); await page.screenshot({ path: path.join(out, 'v3-' + route + '-' + width + '.png'), fullPage: true }); }
+    await page.goto(base + '/#community'); await page.waitForSelector('[data-community=join]'); await page.locator('[data-community=join]').first().click(); await page.waitForSelector('.identity-grid'); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.goto(topicUrl); await page.waitForSelector('.review-card');
+  }
+  pass('1440、390、320 像素下图文首页、广场、资料入口、议题及社区认证页面无横向溢出');
+  await page.setViewportSize({ width: 1440, height: 1000 }); await page.locator('[data-community=withdraw]').click(); await page.waitForFunction(() => document.querySelectorAll('.review-card').length === 1);
+  empty = true; await page.goto(base + '/#community'); await page.locator('[data-community=new-topic]').first().click(); await page.locator('#topic-query').fill('仅测试暂时没有来源的生活公开说法'); await page.locator('[name=publicConsent]').check(); await page.locator('#topic-form button[type=submit]').click(); await page.waitForFunction(() => !document.querySelector('#community-form-error').hidden);
+  assert.match(await page.locator('#community-form-error').innerText(), /没有检索到/); await page.keyboard.press('Escape'); await page.locator('[data-community=refresh]').click(); await page.waitForSelector('.topic-card'); assert.equal(await page.locator('.topic-card').count(), 1);
+  const disk = await readFile(path.join(dataDir, 'community.json'), 'utf8'); assert.ok(!disk.includes(key)); assert.deepEqual(errors, []);
+  pass('评议能撤回；无搜索结果不建立议题；共享文件不保存搜索密钥，页面无脚本错误');
+  await writeFile(path.join(out, 'community-ui-results.json'), JSON.stringify({ checkedAt: new Date().toISOString(), upstream: 'mock only; source fixtures are not genuine contest queries', checks, errors }, null, 2));
+  console.log('Community UI checks passed: ' + checks.length);
+} finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

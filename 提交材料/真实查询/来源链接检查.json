@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-10-25T06:43:25.669Z",
+  "note": "HTTP 可访问性检查，不等于对网页全部内容作事实认证。",
+  "results": [
+    {
+      "name": "故宫官方参观须知",
+      "url": "https://www.dpm.org.cn/singles_detail/259831.html",
+      "status": 200,
+      "finalUrl": "https://www.dpm.org.cn/singles_detail/259831.html",
+      "ok": true
+    },
+    {
+      "name": "塑料编号：内蒙古消费者协会",
+      "url": "https://www.nmg315.com.cn/qgdt/4921.html",
+      "status": 200,
+      "finalUrl": "https://www.nmg315.com.cn/qgdt/4921.html",
+      "ok": true
+    },
+    {
+      "name": "塑料编号：央视少儿",
+      "url": "https://big5.cctv.com/gate/big5/shaoer.cctv.com/2017/04/25/ARTI8rwNJpABHD2frgHNHYbH170425.shtml",
+      "status": 200,
+      "finalUrl": "https://big5.cctv.com/gate/big5/shaoer.cctv.com/2017/04/25/ARTI8rwNJpABHD2frgHNHYbH170425.shtml",
+      "ok": true
+    },
+    {
+      "name": "电影：新浪娱乐专题",
+      "url": "https://ent.sina.com.cn/f/m/up",
+      "status": 200,
+      "finalUrl": "https://ent.sina.com.cn/f/m/up/",
+      "ok": true
+    },
+    {
+      "name": "电影：哔哩哔哩作品页",
+      "url": "https://www.bilibili.com/bangumi/media/md28341019",
+      "status": 200,
+      "finalUrl": "https://www.bilibili.com/bangumi/media/md28341019",
+      "ok": true
+    }
+  ]
+}
